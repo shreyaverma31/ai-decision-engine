@@ -1,0 +1,7 @@
+[client]
+# Never show Python tracebacks in the browser; app.py also shows friendly errors.
+showErrorDetails = "none"
+toolbarMode = "minimal"
+
+[browser]
+gatherUsageStats = false
