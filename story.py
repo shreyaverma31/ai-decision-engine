@@ -28,7 +28,7 @@ POSSIBLE_CAUSES = {
     "decline_with_rising_returns": [
         ("Product quality or defect issues", "return_rate", "up"),
         ("Fulfillment / delivery problems", "return_rate", "up"),
-        ("Demand, pricing, or competition changes", "units", "down"),
+        ("Demand, pricing, or competition changes", "revenue", "down"),
     ],
     "decline_with_stable_returns": [
         ("Demand or competition changes", "units", "down"),
@@ -57,10 +57,94 @@ def linked_possible_causes(rule: str | None, metrics: dict) -> list[dict]:
         m = metrics[metric]
         if (m["change"] > 0) != (direction == "up") or m["change"] == 0:
             continue  # the supporting signal did not move this way, so don't suggest it
-        value = fmt_value(metric, m["previous"]) + " → " + fmt_value(metric, m["current"])
-        causes.append({"cause": cause, "metric": metric,
-                       "signal": f"{SIGNAL_NAMES[metric]} {value} ({fmt_pct(m['change_percent'])})"})
+        prev, cur = fmt_value(metric, m["previous"]), fmt_value(metric, m["current"])
+        if direction == "up":
+            evidence = f"{SIGNAL_NAMES[metric]} increased from {prev} to {cur}."
+        else:
+            evidence = f"{SIGNAL_NAMES[metric]} declined by {abs(m['change_percent']):.1f}% ({prev} → {cur})."
+        causes.append({
+            "cause": cause,
+            "metric": metric,
+            "signal": f"{SIGNAL_NAMES[metric]} {prev} → {cur} ({fmt_pct(m['change_percent'])})",
+            # Always phrased as a possibility: the data shows what changed, not why.
+            "statement": f"{cause} may be contributing. This requires investigation.",
+            "evidence_text": evidence,
+        })
     return causes
+
+
+# What each engine rule means, in plain English (shown next to the recommended action).
+RULE_DESCRIPTIONS = {
+    "decline_with_rising_returns": (
+        "Sales fell significantly while the return rate rose significantly in the same segment, "
+        "so the rule recommends checking quality, fulfillment, and customer experience before investing more."
+    ),
+    "decline_with_stable_returns": (
+        "Sales fell significantly but the return rate did not rise, "
+        "so the rule points to demand, pricing, and availability."
+    ),
+    "rising_returns_without_decline": (
+        "The return rate rose significantly before sales fell, so the rule recommends auditing returns early."
+    ),
+    "profit_decline_with_stable_revenue": (
+        "Profit fell while revenue held up, so the rule points to costs, discounting, and pricing."
+    ),
+}
+
+# Plain-English names for the engine's finding types.
+FINDING_LABELS = {
+    "revenue_decline": "Revenue decline",
+    "profit_decline": "Profit decline",
+    "units_decline": "Units decline",
+    "return_rate_increase": "Return-rate increase",
+    "concentrated_decline": "Decline concentrated in this region + product",
+    "region_specific_decline": "Region-specific decline",
+    "product_specific_decline": "Product-specific decline",
+}
+
+
+def significance_checks(m: dict, insights: list[dict], segment: str, t: Thresholds) -> list[dict]:
+    """How each change compares with the engine's own significance thresholds."""
+    severity = {i["metric"]: i["severity"] for i in insights
+                if i["dimension_value"] == segment and i["type"].endswith(("_decline", "_increase"))
+                and i["type"] not in ("concentrated_decline", "region_specific_decline", "product_specific_decline")}
+    checks = []
+    for metric, name in (("revenue", "Revenue"), ("profit", "Profit"), ("units", "Units")):
+        pct = m[metric]["change_percent"]
+        checks.append({
+            "metric": metric,
+            "label": name,
+            "value": fmt_pct(pct),
+            "criterion": f"significant if it falls by {t.decline_pct:.0f}% or more",
+            "significant": pct is not None and pct <= -t.decline_pct,
+            "severity": severity.get(metric),
+        })
+    rr = m["return_rate"]
+    rel, pp, z = rr["change_percent"], rr["change"] * 100, rr.get("z_score", 0.0)
+    checks.append({
+        "metric": "return_rate",
+        "label": "Return rate",
+        "value": f"{fmt_pct(rel)} relative ({pp:+.1f} pp), z = {z:.1f}",
+        "criterion": (f"significant if it rises by {t.return_rate_increase_pct:.0f}% or more, by at least "
+                      f"{t.return_rate_increase_pp:g} pp, and z ≥ {t.min_z_score:g}"),
+        "significant": (rel is not None and rel >= t.return_rate_increase_pct
+                        and pp >= t.return_rate_increase_pp and z >= t.min_z_score),
+        "severity": severity.get("return_rate"),
+    })
+    return checks
+
+
+def supporting_findings(insights: list[dict]) -> list[dict]:
+    """The engine's detected findings behind this problem, with their evidence IDs."""
+    return [{
+        "id": i["id"],
+        "type": i["type"],
+        "label": FINDING_LABELS.get(i["type"], i["type"].replace("_", " ").capitalize()),
+        "segment": i["dimension_value"],
+        "severity": i["severity"],
+        "summary": i["summary"],
+        "evidence_ids": list(dict.fromkeys(e["id"] for e in i["evidence"])),
+    } for i in insights]
 
 PRIMARY_ACTION = {
     "decline_with_rising_returns": (
@@ -256,6 +340,8 @@ def build_story(df: pd.DataFrame, report: dict, thresholds: Thresholds | None = 
         "worse_than_peers": worse_than_peers,
         "emphasis": emphasis,
         "possible_causes": causes,
+        "significance": significance_checks(m, issue["insights"], segment, t),
+        "findings": supporting_findings(issue["insights"]),
         "evidence": evidence,
         "action": _action(segment, filters, m, peers, rules, main_rule, t),
         "rule": main_rule,
@@ -271,7 +357,8 @@ def build_story(df: pd.DataFrame, report: dict, thresholds: Thresholds | None = 
 
 def _action(segment, filters, m, peers, rules, main_rule, t: Thresholds) -> dict:
     if main_rule is None:
-        return {"primary": None, "why": None, "secondary": None, "secondary_why": None}
+        return {"primary": None, "why": None, "secondary": None, "secondary_why": None,
+                "rule_description": None}
 
     fell = [name for name in ("revenue", "profit", "units")
             if m[name]["change_percent"] is not None and m[name]["change_percent"] <= -t.decline_pct]
@@ -310,6 +397,7 @@ def _action(segment, filters, m, peers, rules, main_rule, t: Thresholds) -> dict
         "why": why,
         "secondary": secondary,
         "secondary_why": secondary_why,
+        "rule_description": RULE_DESCRIPTIONS.get(main_rule),
     }
 
 

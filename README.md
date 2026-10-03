@@ -28,7 +28,7 @@ Stack: Python · pandas · NumPy · Streamlit · Plotly · pytest · Ollama (`ll
 | `llm.py` – LLM explanation layer (Ollama) with deterministic fallback | done |
 | `story.py` – top-issue presentation layer (one clear story per dataset) | done |
 | `app.py` – Streamlit UI | done |
-| `tests/` – 222 pytest tests (no Ollama needed) | done |
+| `tests/` – 248 pytest tests (no Ollama needed) | done |
 
 ## Demo in 30 seconds
 

@@ -179,12 +179,35 @@ def section_overview(story: dict) -> None:
     st.markdown(f"**{md(o['sentence'])}**")
 
 
-def section_problem(p: dict) -> None:
+# The three kinds of statement on the page, always labelled so certainty is never implied.
+FINDING_BADGE = ":blue-badge[📊 Data-backed finding]"
+POSSIBLE_BADGE = ":orange-badge[💭 Possible explanation — not proven]"
+INVESTIGATE_BADGE = ":green-badge[🔍 Recommended investigation]"
+
+
+def section_reading_guide() -> None:
+    """The principle the whole page follows: what changed ≠ why it changed."""
+    cols = st.columns(3)
+    guide = [
+        (FINDING_BADGE, "**What the data shows**", "Measured changes: what changed, where, and by how much."),
+        (POSSIBLE_BADGE, "**What the system suspects**", "Hypotheses consistent with the evidence. Not proven."),
+        (INVESTIGATE_BADGE, "**What should be investigated**", "The next step to confirm or rule out each hypothesis."),
+    ]
+    for col, (badge, title, text) in zip(cols, guide):
+        with col.container(border=True):
+            st.markdown(f"{badge}\n\n{title}\n\n{text}")
+    st.caption("The data shows what changed and where. It does not, by itself, prove why it happened.")
+
+
+def section_problem(p: dict, story: dict) -> None:
     st.header("🚨 Main Business Problem")
     badge = {"high": ":red-badge[High severity]", "medium": ":orange-badge[Medium severity]",
              "low": ":gray-badge[Low severity]"}[p["severity"]]
     st.subheader(p["segment"])
-    st.markdown(badge)
+    st.markdown(f"{badge} {FINDING_BADGE}")
+    prev, cur = story["period_previous"]["label"], story["period_current"]["label"]
+    st.caption(f"Detected from measurable changes in the uploaded data for {p['segment']}, "
+               f"{prev} compared with {cur}.")
     m = p["metrics"]
     rr = m["return_rate"]
     rr_arrow = "↑" if rr["change"] > 0 else "↓" if rr["change"] < 0 else "→"
@@ -199,6 +222,7 @@ def section_problem(p: dict) -> None:
 
 def section_why(p: dict, story: dict) -> None:
     st.header("Why did the system flag it?")
+    st.markdown(f"{FINDING_BADGE} Every step below is measured from the data; none of it is a guess.")
     prev, cur = story["period_previous"], story["period_current"]
 
     st.subheader("Step 1 — What changed?")
@@ -209,7 +233,16 @@ def section_why(p: dict, story: dict) -> None:
         f"- **{names[k]}:** {md(fmt_value(k, v['previous']))} → {md(fmt_value(k, v['current']))}"
         for k, v in p["metrics"].items()))
 
-    st.subheader("Step 2 — Is this isolated?")
+    st.subheader("Step 2 — How significant is the change?")
+    st.markdown("\n".join(
+        f"- {'✅' if c['significant'] else '➖'} **{c['label']}: {md(c['value'])}** — "
+        f"{'significant' if c['significant'] else 'below the significance threshold'} "
+        f"({c['criterion']})" + (f" · {c['severity']} severity" if c["severity"] else "")
+        for c in p["significance"]))
+    st.caption("These are the engine's fixed detection thresholds. For return rate, z measures how unlikely "
+               "the change is to be random noise; 3 or more means very unlikely.")
+
+    st.subheader("Step 3 — Is the problem concentrated in this segment?")
     if p["peers"]:
         left, right = st.columns([2, 3])
         with left:
@@ -224,19 +257,61 @@ def section_why(p: dict, story: dict) -> None:
     else:
         st.markdown("There is no peer group to compare against in this data.")
 
-    st.subheader("Step 3 — What does the data suggest?")
-    if p["possible_causes"]:
-        st.warning("**Possible causes — NOT proven by the data**\n\n"
-                   + "\n".join(f"- **{c['cause']}** — linked evidence: {md(c['signal'])}"
-                               for c in p["possible_causes"])
-                   + "\n\nThe data shows what changed and where, not why. Each of these needs to be checked.",
-                   icon="⚠️")
+    st.subheader("Step 4 — What evidence supports the finding?")
+    st.markdown("The engine detected these findings for this problem. Each one points to evidence you "
+                "can check in **🔎 Show how every number was calculated** below.")
+    st.markdown("\n".join(
+        f"- **{f['label']}** · {f['segment']} · {f['severity']} severity · evidence "
+        f"{', '.join(f['evidence_ids'])}" for f in p["findings"]))
+
+
+def section_possible_causes(p: dict) -> None:
+    st.header("Possible causes — NOT proven by the data")
+    st.markdown(f"{POSSIBLE_BADGE} The data shows **what** changed and **where**. It cannot prove **why**. "
+                f"Each possibility below is linked to the evidence that suggested it, and needs investigation.")
+    if not p["possible_causes"]:
+        st.info("No possible causes are suggested: none of the supporting signals moved in a way that "
+                "would point to one.")
+        return
+    for c in p["possible_causes"]:
+        with st.container(border=True):
+            st.markdown(f"💭 **{md(c['statement'])}**\n\n"
+                        f"*Evidence that led to this hypothesis:* {md(c['evidence_text'])}")
+
+
+METRIC_NAMES = {"revenue": "Revenue", "profit": "Profit", "units": "Units", "returns": "Returns",
+                "return_rate": "Return rate", "profit_margin": "Profit margin", "cost": "Cost"}
+
+
+def fmt_segment(filters: dict) -> str:
+    """Readable segment name from evidence filters (a multi-value filter means 'the others')."""
+    single = " / ".join(v[0] for v in filters.values() if len(v) == 1)
+    multi = [d for d, v in filters.items() if len(v) > 1]
+    if not multi:
+        return single or "All business"
+    dim = multi[0]
+    if not single:
+        return f"All other {dim}s"
+    return f"Other products in {single}" if dim == "product" else f"{single} in other {dim}s"
+
+
+def fmt_change(metric: str, change: float) -> str:
+    """Absolute change: money with sign, units as a count, rates in percentage points."""
+    if metric in ("return_rate", "profit_margin"):
+        return f"{change * 100:+.1f} pp"
+    if metric in ("revenue", "profit", "cost"):
+        return ("+" if change >= 0 else "-") + fmt_money(abs(change))
+    return f"{int(change):+,}"
 
 
 def section_traceability(p: dict, story: dict, full_report: dict) -> None:
     with st.expander("🔎 Show how every number was calculated", expanded=False):
-        st.markdown("Every number above is recomputed from rows of the uploaded data. Each row below "
-                    "is one piece of evidence: which rows were used (source filter), which dates, and the result.")
+        prev, cur = story["period_previous"], story["period_current"]
+        st.markdown(
+            "Every number on this page is recomputed from rows of the uploaded data. Each row below is one "
+            f"piece of evidence. **Previous** is {prev['label']} ({prev['start']} to {prev['end']}); "
+            f"**Current** is {cur['label']} ({cur['start']} to {cur['end']}). *Source filter* shows exactly "
+            "which rows were used.")
         # Numbers shown on the page first; the same fact recorded under several IDs is one row.
         rows: dict[tuple, dict] = {}
         for e in p["evidence"] + story["focused_report"]["evidence"]:
@@ -245,17 +320,25 @@ def section_traceability(p: dict, story: dict, full_report: dict) -> None:
                 if e["id"] not in rows[key]["Evidence"].split(", "):
                     rows[key]["Evidence"] += f", {e['id']}"
                 continue
+            metric = METRIC_NAMES.get(e["metric"], e["metric"])
+            if e.get("role") == "driver":
+                metric += " (largest contributor to the wider change)"
             rows[key] = {
                 "Evidence": e["id"],
-                "What": e["description"][:1].upper() + e["description"][1:],
+                "Metric": metric,
+                "Segment": fmt_segment(e["filters"]),
+                f"Previous ({prev['label']})": fmt_value(e["metric"], e["previous_value"]),
+                f"Current ({cur['label']})": fmt_value(e["metric"], e["current_value"]),
+                "Absolute change": fmt_change(e["metric"], e["change"]),
+                "% change": fmt_pct(e["change_percent"]),
                 "Source filter": fmt_filters(e["filters"]),
-                "Previous": f"{fmt_value(e['metric'], e['previous_value'])} "
-                            f"({e['period_previous_range'][0]} to {e['period_previous_range'][1]})",
-                "Current": f"{fmt_value(e['metric'], e['current_value'])} "
-                           f"({e['period_current_range'][0]} to {e['period_current_range'][1]})",
-                "Change": fmt_pct(e["change_percent"]),
                 "Rows used": f"{e['rows_previous']:,} / {e['rows_current']:,}",
             }
+        def id_order(evidence_id: str) -> tuple:
+            return (evidence_id[0], int(evidence_id[1:]) if evidence_id[1:].isdigit() else 0)
+
+        for row in rows.values():
+            row["Evidence"] = ", ".join(sorted(row["Evidence"].split(", "), key=id_order))
         st.dataframe(pd.DataFrame(rows.values()), hide_index=True)
         n = full_report["metadata"]["insight_count"]
         st.caption(f"This page focuses on the top issue. The engine detected {n} findings in total; "
@@ -271,14 +354,18 @@ def section_explanation(story: dict, use_llm: bool) -> None:
     with st.spinner(spinner):
         result = explain(json.dumps(story["focused_report"]), use_llm)
     status_message(result)
+    st.caption("The AI only explains the evidence above. It was not asked to find the cause itself, and its "
+               "output is checked against the evidence before it is shown.")
 
     st.markdown(md(result["summary"]))
     findings = result["key_findings"][:3]
     if findings:
-        st.markdown("**Key findings**\n" + "\n".join(f"- {md(f['statement'])}" for f in findings))
+        st.markdown(f"**Key findings** {FINDING_BADGE}\n"
+                    + "\n".join(f"- {md(f['statement'])}" for f in findings))
     possible = unique_causes(c for r in result["reasoning"] for c in r["possible_explanations"])[:3]
     if possible:
-        st.warning("**Possible causes — not facts:**\n" + causes_markdown(possible), icon="⚠️")
+        st.warning("**Possible causes — not facts:** these may be contributing and require investigation.\n"
+                   + causes_markdown(possible), icon="⚠️")
 
 
 def section_action(p: dict | None) -> None:
@@ -287,13 +374,17 @@ def section_action(p: dict | None) -> None:
     if not action or not action["primary"]:
         st.success("No action needed: no significant problems were detected in this data.")
         return
+    st.markdown(INVESTIGATE_BADGE)
     st.success(f"**{md(action['primary'])}**", icon="🎯")
     st.markdown(f"**Why?** {md(action['why'])}")
+    st.markdown(f"**Rule:** `{p['rule']}`" + (f" — {md(action['rule_description'])}"
+                                              if action.get("rule_description") else ""))
     if action["secondary"]:
         st.markdown(f"**Secondary action:** {md(action['secondary'])}")
         if action["secondary_why"]:
             st.caption(md(action["secondary_why"]))
-    st.caption(f"Chosen by the rule `{p['rule']}` from the evidence above.")
+    st.caption("Recommended by a fixed rule from the data-backed findings above. It is an investigation to "
+               "run, not a conclusion about the cause.")
 
 
 def section_question(report: dict, placeholder: str, use_llm: bool) -> None:
@@ -376,9 +467,11 @@ def main() -> None:
         st.success("No significant problems detected: no segment shows a significant decline or "
                    "return-rate increase between the two periods.")
     else:
-        section_problem(problem)
+        section_reading_guide()
+        section_problem(problem, story)
         section_why(problem, story)
         section_traceability(problem, story, report)
+        section_possible_causes(problem)
     section_explanation(story, use_llm)
     section_action(problem)
     # Answers use the same verified evidence as the page (the focused top-issue report).

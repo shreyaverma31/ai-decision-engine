@@ -34,7 +34,11 @@ DEFAULT_TIMEOUT = 180.0  # seconds; small local models on CPU are slow
 MAX_ATTEMPTS = 2         # one retry with the validation errors fed back
 MAX_OUTPUT_TOKENS = 900
 
-GROUNDING_RULES = """The report was produced by a deterministic analysis engine. Rules:
+GROUNDING_RULES = """The report was produced by a deterministic analysis engine. Your job is to EXPLAIN the
+evidence it already produced, not to analyse the business yourself or come up with your own
+explanation. The data shows WHAT changed and WHERE; it does not by itself prove WHY.
+Rules:
+0. Only use the supplied evidence. Do not add facts, numbers, segments or causes from outside it.
 1. The evidence is authoritative. Treat every number in it as correct and final.
 2. Do not invent numbers. Only use numbers that appear in the report, copied as written.
    Do not calculate new numbers (no new percentages, sums, differences or forecasts).
@@ -44,7 +48,10 @@ GROUNDING_RULES = """The report was produced by a deterministic analysis engine.
 5. Recommendations must be grounded in the supplied evidence, must cite the
    insight IDs they are based on, and must use a recommendation_id from the report.
 6. If the evidence is insufficient to establish a cause, say that further investigation is needed.
+   The data in this report cannot establish a cause on its own, so say explicitly that the
+   cause is not established by the data.
 7. Never claim certainty about causation when the data only shows correlation.
+   Never present a hypothesis as a fact: write "X may be contributing", never "X caused the decline".
    Phrase possible explanations with "may", "might" or "could".
 8. Only mention metrics that are in the report (revenue, cost, profit, profit margin,
    units, returns, return rate). Do not mention metrics such as traffic, conversion,
@@ -54,9 +61,16 @@ GROUNDING_RULES = """The report was produced by a deterministic analysis engine.
    Quality, defect, fulfillment, delivery or returns causes must cite a return-rate finding.
    Pricing, discount or cost causes must cite a profit or revenue finding.
    Demand, competition or availability causes must cite a revenue or units decline.
-   If no finding supports a cause, do not list it. The report's "cause_links" lists, for each
-   kind of cause, the insight IDs that can support it: only propose those kinds of causes,
-   and cite IDs from that list."""
+   If no finding supports a cause, do not list it. The report's "cause_links" lists business
+   hypotheses and, for each, the insight IDs that can support it: only propose those hypotheses,
+   and cite IDs from that list.
+10. A possible cause must NAME A BUSINESS HYPOTHESIS (what might be happening in the business),
+   not restate the finding. Write it as "<hypothesis from cause_links> may be contributing to
+   <the observed change>", and put the finding itself in "evidence". Never write
+   "<metric> increase/decline may be contributing" - a measured change is evidence, not a cause.
+11. The report's "causes_to_cover" lists the findings that drove the recommendation. Give at
+   least one possible cause for EACH entry, linked to that entry's insight IDs and named as one
+   of its suggested hypotheses."""
 
 SYSTEM_PROMPT = """You are a business analyst explaining a decision report to a manager.
 
@@ -159,6 +173,70 @@ CAUSE_TOPICS = [
      DECLINE_TYPES, "a revenue or units decline"),
 ]
 
+# Words that name something that might be happening in the business. Metric words such as
+# "return rate", "revenue" or "margin" are deliberately absent: a measured change is evidence,
+# not a cause. (They still decide, via CAUSE_TOPICS, which finding a cause must cite.)
+BUSINESS_HYPOTHESIS = re.compile(
+    r"quality|defect|faulty|fulfil|deliver|shipping|damage|packag|listing|expectation|"
+    r"pric|discount|cost|supplier|demand|competit|market|preference|availab|stock|inventory|"
+    r"seasonal|promotion|customer experience|customer service", re.I)
+
+# Named business hypotheses and the finding types that can make each plausible.
+# Used for the model's "cause_links" and to suggest a proper hypothesis in retry feedback.
+CAUSE_HYPOTHESES = [
+    ("Product quality or defect issues", RETURN_TYPES),
+    ("Fulfillment or delivery problems", RETURN_TYPES),
+    ("Pricing or discount changes", PRICE_TYPES),
+    ("Weaker demand or stronger competition", DECLINE_TYPES),
+]
+
+
+def suggested_hypotheses(linked_types: set[str]) -> list[str]:
+    """Business hypotheses the linked findings can support, most specific first."""
+    return [name for name, types in CAUSE_HYPOTHESES if linked_types & types]
+
+
+# The findings each engine rule is based on. The explanation must offer a possible cause for each,
+# so a key signal (e.g. the return-rate rise behind "decline with rising returns") is never skipped.
+RULE_SIGNALS = {
+    "decline_with_rising_returns": [RETURN_TYPES, DECLINE_TYPES],
+    "decline_with_stable_returns": [DECLINE_TYPES],
+    "rising_returns_without_decline": [RETURN_TYPES],
+    "profit_decline_with_stable_revenue": [{"profit_decline"}],
+}
+
+
+def required_cause_coverage(report: dict) -> list[dict]:
+    """For each recommendation's main rule: the findings that drove it, and hypotheses that fit them."""
+    by_id = {i["id"]: i for i in report.get("key_insights", [])}
+    required, seen = [], set()
+    for rec in report.get("recommendations", []):
+        main_rule = next((r for r in rec.get("rules_triggered", []) if r in RULE_SIGNALS), None)
+        if main_rule is None:
+            continue
+        own = [by_id[i] for i in rec["based_on_insights"]
+               if i in by_id and by_id[i]["dimension_value"] == rec["segment"]]
+        for types in RULE_SIGNALS[main_rule]:
+            ids = [i["id"] for i in own if i["type"] in types]
+            if not ids or frozenset(ids) in seen:
+                continue
+            seen.add(frozenset(ids))
+            required.append({"insight_ids": ids,
+                             "suggested_hypotheses": suggested_hypotheses({by_id[i]["type"] for i in ids})})
+    return required
+
+
+def coverage_issues(causes: list[dict], report: dict) -> list[str]:
+    """Findings that drove a recommendation but have no possible cause linked to them."""
+    linked = {x for c in causes for x in c.get("linked_insight_ids", [])}
+    issues = []
+    for need in required_cause_coverage(report):
+        if not linked & set(need["insight_ids"]):
+            examples = " or ".join(f"\"{h} may be contributing\"" for h in need["suggested_hypotheses"][:2])
+            issues.append(f"No possible cause is linked to {', '.join(need['insight_ids'])}, which drove the "
+                          f"recommendation. Add one, e.g. {examples}, with that finding as evidence.")
+    return issues
+
 # Hypotheses the data is consistent with but cannot confirm, one set per engine rule,
 # each with the finding types that make it plausible. Used by the deterministic fallback.
 RULE_HYPOTHESES = {
@@ -247,6 +325,7 @@ def build_llm_context(report: dict) -> dict:
             for r in report.get("recommendations", [])
         ],
         "cause_links": cause_links(report),
+        "causes_to_cover": required_cause_coverage(report),
     }
 
 
@@ -256,13 +335,8 @@ def cause_links(report: dict) -> dict[str, list[str]]:
     Given to the model so it only proposes causes the evidence can support.
     """
     insights = report.get("key_insights", [])
-    links = {
-        "quality, defects, fulfillment, delivery or returns": RETURN_TYPES,
-        "pricing, discounts or costs": PRICE_TYPES,
-        "demand, competition or availability": DECLINE_TYPES,
-    }
-    out = {topic: [i["id"] for i in insights if i["type"] in types] for topic, types in links.items()}
-    return {topic: ids for topic, ids in out.items() if ids}
+    out = {name: [i["id"] for i in insights if i["type"] in types] for name, types in CAUSE_HYPOTHESES}
+    return {name: ids for name, ids in out.items() if ids}
 
 
 def build_messages(report: dict) -> list[dict]:
@@ -360,8 +434,39 @@ def allowed_numbers(report: dict) -> list[float]:
     return sorted(numbers)
 
 
-def unsupported_numbers(text: str, allowed: list[float]) -> list[str]:
-    """Numbers in `text` that don't match (within display rounding) a report number."""
+def allowed_pp_numbers(report: dict) -> list[float]:
+    """Percentage-point values the report actually contains: peer gaps, return-rate and margin changes.
+
+    A figure written with "pp" must be one of these, not just any number that happens to be in
+    the report (e.g. "+4.8 pp" when 4.8 is a revenue % change elsewhere).
+    """
+    values = set()
+
+    def walk(obj):
+        if isinstance(obj, dict):
+            for key, v in obj.items():
+                if key in ("gaps_pp", "change_pp"):
+                    values.update(_numeric_leaves(v))
+                walk(v)
+            if obj.get("metric") in ("return_rate", "profit_margin") and isinstance(obj.get("change"), (int, float)):
+                values.add(abs(obj["change"]) * 100)
+            if isinstance(obj.get("return_rate"), dict) and isinstance(obj["return_rate"].get("change"), (int, float)):
+                values.add(abs(obj["return_rate"]["change"]) * 100)
+            if isinstance(obj.get("profit_margin"), dict) and isinstance(obj["profit_margin"].get("change"), (int, float)):
+                values.add(abs(obj["profit_margin"]["change"]) * 100)
+        elif isinstance(obj, list):
+            for v in obj:
+                walk(v)
+
+    walk(report)
+    return sorted(values)
+
+
+def unsupported_numbers(text: str, allowed: list[float], allowed_pp: list[float] | None = None) -> list[str]:
+    """Numbers in `text` that don't match (within display rounding) a report number.
+
+    If `allowed_pp` is given, figures written with "pp" must match one of those values.
+    """
     bad = []
     for match in NUMBER.finditer(text):
         digits, unit = match.group(1), match.group(2)
@@ -371,6 +476,10 @@ def unsupported_numbers(text: str, allowed: list[float]) -> list[str]:
             continue
         # A number rounded for display may be up to half a unit of its last digit off.
         tol = 0.5 * 10 ** -decimals + 1e-9
+        if allowed_pp is not None and unit and unit.lower() in ("pp", "percentage point", "percentage points"):
+            if not any(abs(a - value) <= tol for a in allowed_pp):
+                bad.append(match.group(0).strip())
+            continue
         scales = SCALES.get(unit.lower() if unit and unit not in ("M", "K", "B") else unit, [1])
         if not any(abs(a * s - value) <= tol for a in allowed for s in scales):
             bad.append(match.group(0).strip())
@@ -524,10 +633,13 @@ def check_causes(causes: list[dict], report: dict, where: str) -> list[str]:
         if ASSERTIVE.search(c["cause"]) and not HEDGE.search(c["cause"]):
             issues.append(f"{label} states a cause without may/might/could: \"{c['cause'][:80]}\".")
         linked_types = {by_id[x]["type"] for x in ids if x in by_id}
-        if not any(pattern.search(c["cause"]) for pattern, _, _ in CAUSE_TOPICS):
-            issues.append(f"{label} restates a metric instead of naming a business cause "
+        if not BUSINESS_HYPOTHESIS.search(c["cause"]):
+            suggestions = suggested_hypotheses(linked_types)
+            hint = (f" Name the hypothesis instead, e.g. \"{suggestions[0]} may be contributing\", and keep "
+                    f"the finding in evidence." if suggestions else "")
+            issues.append(f"{label} restates a metric or finding instead of naming a business hypothesis "
                           f"(e.g. quality, fulfillment, pricing, demand, competition, availability, costs): "
-                          f"\"{c['cause'][:80]}\".")
+                          f"\"{c['cause'][:80]}\".{hint}")
         for pattern, types, needed in CAUSE_TOPICS:
             if pattern.search(c["cause"]) and linked_types and not linked_types & types:
                 issues.append(f"{label} (\"{c['cause'][:60]}\") must cite {needed}.")
@@ -570,11 +682,13 @@ def validate_explanation(explanation, report: dict) -> list[str]:
     covered = {r["recommendation_id"] for r in explanation["recommendations"]}
     for missing in sorted(rec_ids - covered):
         issues.append(f"Recommendation {missing} from the report is not covered.")
+    issues += coverage_issues([c for r in explanation["reasoning"] for c in r["possible_explanations"]
+                               if isinstance(c, dict)], report)
 
-    allowed = allowed_numbers(report)
+    allowed, allowed_pp = allowed_numbers(report), allowed_pp_numbers(report)
     facts, hypotheses = explanation_texts(explanation)
     for text in facts + hypotheses:
-        for number in unsupported_numbers(text, allowed):
+        for number in unsupported_numbers(text, allowed, allowed_pp):
             issues.append(f"Number not found in the report: '{number}' in \"{text[:80]}\".")
         if CERTAINTY.search(text):
             issues.append(f"Claims certainty: \"{text[:80]}\".")
@@ -830,9 +944,9 @@ def validate_answer(answer, report: dict) -> list[str]:
     issues += [f"Cites unknown insight '{x}'." for x in answer["insight_ids"] if x not in known]
     issues += check_causes(answer["possible_explanations"], report, "possible_explanations")
     causes = answer["possible_explanations"]
-    allowed = allowed_numbers(report)
+    allowed, allowed_pp = allowed_numbers(report), allowed_pp_numbers(report)
     for text in [answer["answer"]] + [c["cause"] for c in causes] + [c["evidence"] for c in causes]:
-        issues += [f"Number not found in the report: '{n}'." for n in unsupported_numbers(text, allowed)]
+        issues += [f"Number not found in the report: '{n}'." for n in unsupported_numbers(text, allowed, allowed_pp)]
         if CERTAINTY.search(text):
             issues.append(f"Claims certainty: \"{text[:80]}\".")
     for sentence in _sentences(answer["answer"]):

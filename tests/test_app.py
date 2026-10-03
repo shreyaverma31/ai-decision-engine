@@ -114,10 +114,12 @@ def test_demo_flow_shows_all_sections():
     assert_no_crash(at)
     headers = [h.value for h in at.header if h.value != "Data"]
     assert headers == ["Business Overview", "🚨 Main Business Problem", "Why did the system flag it?",
-                       "🤖 AI Explanation", "Recommended Action", "Ask the Business Data"]
+                       "Possible causes — NOT proven by the data", "🤖 AI Explanation",
+                       "Recommended Action", "Ask the Business Data"]
     steps = [h.value for h in at.subheader][1:]
-    assert steps == ["Step 1 — What changed?", "Step 2 — Is this isolated?",
-                     "Step 3 — What does the data suggest?"]
+    assert steps == ["Step 1 — What changed?", "Step 2 — How significant is the change?",
+                     "Step 3 — Is the problem concentrated in this segment?",
+                     "Step 4 — What evidence supports the finding?"]
     assert app.FOOTER in texts(at)
 
 
@@ -137,22 +139,49 @@ def test_demo_key_issue():
             "performance and its peer groups.") in texts(at)
 
 
-def test_demo_three_steps():
+def test_demo_four_evidence_steps():
     body = texts(run_demo())
     # Step 1 - what changed
     for line in ("**Revenue:** $3.19M → $2.39M", "**Profit:** $859.8K → $603.0K",
                  "**Units:** 2,217 → 1,696", "**Return rate:** 4.7% → 8.5%"):
         assert line in body
-    # Step 2 - is it isolated?
+    # Step 2 - how significant (the engine's own thresholds)
+    assert "✅ **Revenue: -25.2%** — significant (significant if it falls by 10% or more)" in body
+    assert "✅ **Return rate: +80.5% relative (+3.8 pp), z = 4.8** — significant" in body
+    # Step 3 - is it concentrated?
     assert "Laptop Pro in other regions: **+4.6%**" in body
     assert "Other products in South: **+3.1%**" in body
     assert "South / Laptop Pro: **-25.2%**" in body
     assert "South / Laptop Pro is declining much faster than its peers." in body
-    # Step 3 - possible causes, clearly not facts
-    assert "Possible causes — NOT proven by the data" in body
-    for cause in ("Product quality or defect issues", "Fulfillment / delivery problems",
-                  "Demand, pricing, or competition changes"):
-        assert cause in body
+    # Step 4 - which detected findings support it, with evidence IDs
+    assert "**Return-rate increase** · South / Laptop Pro · high severity · evidence E1" in body
+    assert "**Decline concentrated in this region + product** · South / Laptop Pro" in body
+
+
+def test_demo_possible_causes_are_possibilities_with_evidence():
+    at = run_demo()
+    body = texts(at)
+    assert "Possible causes — NOT proven by the data" in [h.value for h in at.header]
+    for cause, evidence in (
+        ("Product quality or defect issues", "Return rate increased from 4.7% to 8.5%."),
+        ("Fulfillment / delivery problems", "Return rate increased from 4.7% to 8.5%."),
+        ("Demand, pricing, or competition changes", "Revenue declined by 25.2% ($3.19M → $2.39M)."),
+    ):
+        assert f"💭 **{cause} may be contributing. This requires investigation.**" in body
+        assert f"*Evidence that led to this hypothesis:* {evidence}" in body
+    # Never stated as fact anywhere on the page.
+    assert "caused the decline" not in body
+    assert "caused by" not in body
+
+
+def test_demo_reading_guide_labels_each_kind_of_statement():
+    body = texts(run_demo())
+    for label in ("Data-backed finding", "Possible explanation — not proven", "Recommended investigation"):
+        assert label in body
+    for title in ("**What the data shows**", "**What the system suspects**",
+                  "**What should be investigated**"):
+        assert title in body
+    assert "It does not, by itself, prove why it happened." in body
 
 
 def test_demo_traceability_is_collapsed_and_traceable():
@@ -161,18 +190,27 @@ def test_demo_traceability_is_collapsed_and_traceable():
     assert expander.label == "🔎 Show how every number was calculated"
     assert not expander.proto.expanded
     table = at.dataframe[0].value
-    assert {"Evidence", "Source filter", "Previous", "Current"} <= set(table.columns)
+    assert list(table.columns) == ["Evidence", "Metric", "Segment", "Previous (2025 H1)",
+                                   "Current (2025 H2)", "Absolute change", "% change",
+                                   "Source filter", "Rows used"]
     assert "region = South, product = Laptop Pro" in table["Source filter"].tolist()
     assert table["Evidence"].is_unique
-    assert table["What"].is_unique  # the same fact is shown once, with all its IDs
-    assert table["What"].iloc[0] == "South / Laptop Pro revenue"  # page numbers come first
+    pairs = list(zip(table["Metric"], table["Segment"]))
+    assert len(pairs) == len(set(pairs))  # the same fact is shown once, with all its IDs
+    first = table.iloc[0]  # the page's own numbers come first
+    assert (first["Metric"], first["Segment"]) == ("Revenue", "South / Laptop Pro")
+    assert (first["Previous (2025 H1)"], first["Current (2025 H2)"]) == ("$3.19M", "$2.39M")
+    assert (first["Absolute change"], first["% change"]) == ("-$805.7K", "-25.2%")
+    rr = table[(table["Metric"] == "Return rate") & (table["Segment"] == "South / Laptop Pro")].iloc[0]
+    assert rr["Absolute change"] == "+3.8 pp"
+    assert "Laptop Pro in other regions" in table["Segment"].tolist()
+    assert "Other products in South" in table["Segment"].tolist()
 
 
 def test_demo_explanation_and_recommendation_with_ai_off():
     at = run_demo()
     assert [i.value for i in at.info] == ["Using evidence-based fallback"]
-    ai_causes = at.warning[1].value
-    assert "Possible causes — not facts" in ai_causes
+    [ai_causes] = [w.value for w in at.warning if "Possible causes — not facts" in w.value]
     assert ai_causes.count("\n- ") == 3
     body = texts(at)
     assert body.count("**Key findings**") == 1
@@ -181,6 +219,10 @@ def test_demo_explanation_and_recommendation_with_ai_off():
     assert ("**Why?** Because revenue, profit, and units declined sharply while the return rate "
             "rose sharply (4.7% → 8.5%).") in body
     assert "**Secondary action:** Review discount depth and pricing for South / Laptop Pro." in body
+    assert ("**Rule:** `decline_with_rising_returns` — Sales fell significantly while the return rate "
+            "rose significantly in the same segment") in body
+    assert "Recommended investigation" in body
+    assert "not a conclusion about the cause" in body
     assert len([s for s in at.success if "🎯" in (s.icon or "")]) == 1  # one primary action
 
 
@@ -273,3 +315,10 @@ def test_rejected_ai_answer_shows_what_the_checks_caught(monkeypatch):
     at = run_demo(use_llm=True)
     assert_no_crash(at)
     assert any("What the evidence checks caught" in e.label for e in at.expander)
+
+
+def test_traceability_evidence_ids_are_sorted():
+    table = run_demo().dataframe[0].value
+    for ids in table["Evidence"]:
+        parts = ids.split(", ")
+        assert parts == sorted(parts, key=lambda x: (x[0], int(x[1:])))

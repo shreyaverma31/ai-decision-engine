@@ -248,9 +248,10 @@ def test_invalid_response_falls_back(name, report, monkeypatch):
 
 
 def test_hedged_cause_in_hypothesis_is_allowed(report):
+    hedged = {"cause": "Returns may be caused by a defective batch; this is not established by the data.",
+              "evidence": "The return rate rose from 4.7% to 8.5%.", "linked_insight_ids": ["I1"]}
     response = _mutated(reasoning__0__possible_explanations=[
-        {"cause": "Returns may be caused by a defective batch; this is not established by the data.",
-         "evidence": "The return rate rose from 4.7% to 8.5%.", "linked_insight_ids": ["I1"]}])
+        hedged, good_response()["reasoning"][0]["possible_explanations"][1]])  # keep decline coverage
     assert llm.validate_explanation(response, report) == []
 
 
@@ -525,9 +526,8 @@ def test_unlinked_or_mislinked_cause_is_rejected(report, monkeypatch, name):
 ])
 def test_correctly_linked_causes_are_accepted(report, cause, ids):
     by_id = {i["id"]: i for i in report["key_insights"]}
-    good = _mutated(reasoning__0__possible_explanations=[
-        _cause(cause, evidence=by_id[ids[0]]["summary"], ids=ids)])
-    assert llm.validate_explanation(good, report) == []
+    # Cause-level checks only; coverage of all required findings is tested separately.
+    assert llm.check_causes([_cause(cause, evidence=by_id[ids[0]]["summary"], ids=ids)], report, "c") == []
 
 
 @pytest.mark.parametrize("bad_cause", [
@@ -607,10 +607,13 @@ def test_bare_hypotheses_allowed_but_assertions_must_be_hedged(report, cause, ok
 def test_context_lists_supportable_cause_links(report):
     links = llm.build_llm_context(report)["cause_links"]
     by_id = {i["id"]: i for i in report["key_insights"]}
-    assert links["quality, defects, fulfillment, delivery or returns"] == [
-        i["id"] for i in report["key_insights"] if i["type"] == "return_rate_increase"]
-    for topic, ids in links.items():
+    return_ids = [i["id"] for i in report["key_insights"] if i["type"] == "return_rate_increase"]
+    assert links["Product quality or defect issues"] == return_ids
+    assert links["Fulfillment or delivery problems"] == return_ids
+    for hypothesis, ids in links.items():
         assert ids and all(x in by_id for x in ids)
+        # Every listed hypothesis is itself a valid business hypothesis.
+        assert llm.BUSINESS_HYPOTHESIS.search(hypothesis), hypothesis
     assert "cause_links" in llm.SYSTEM_PROMPT
 
 
@@ -633,3 +636,125 @@ def test_retry_feedback_lists_each_issue_once():
 ])
 def test_recommending_an_investigation_is_not_a_causal_claim(sentence, claims):
     assert llm.states_cause(sentence) is claims
+
+
+def test_pp_figures_must_be_real_percentage_point_values(report):
+    """A 'pp' figure must be a gap or a rate change, not any number that appears elsewhere."""
+    allowed, allowed_pp = llm.allowed_numbers(report), llm.allowed_pp_numbers(report)
+    assert llm.unsupported_numbers("return rate +3.8 pp", allowed, allowed_pp) == []   # rate change
+    assert llm.unsupported_numbers("gap -29.8 pp", allowed, allowed_pp) == []          # peer gap
+    # 4.8 is South's revenue % change, not a percentage-point value.
+    assert llm.unsupported_numbers("revenue fell 4.8%", allowed, allowed_pp) == []
+    assert llm.unsupported_numbers("a gap of +4.8 pp", allowed, allowed_pp) == ["+4.8 pp"]
+    bad = _mutated(reasoning__0__observed_facts=["Profit fell faster than revenue by +4.8 pp."])
+    assert any("+4.8 pp" in i for i in llm.validate_explanation(bad, report))
+
+
+def test_prompt_says_explain_only_the_supplied_evidence():
+    prompt = llm.SYSTEM_PROMPT
+    for phrase in ("Your job is to EXPLAIN the", "Only use the supplied evidence",
+                   "does not by itself prove WHY", "cause is not established by the data",
+                   "Never present a hypothesis as a fact"):
+        assert phrase in prompt, phrase
+    assert "Only use the supplied evidence" in llm.QA_SYSTEM_PROMPT
+
+
+@pytest.mark.parametrize("restated,ids", [
+    ("South / Laptop Pro return rate increase may be contributing to the decline in revenue and profit.", ["I1"]),
+    ("The higher return rate may be contributing to lower sales.", ["I1"]),
+    ("The revenue decline may be contributing to the profit decline.", ["I3"]),
+    ("Margin compression may be contributing to the profit decline.", ["I2"]),
+    ("Fewer units sold may be contributing to the decline.", ["I5"]),
+])
+def test_cause_that_restates_a_finding_is_rejected(report, restated, ids):
+    """A measured change is evidence, not a cause: the cause must name a business hypothesis."""
+    issues = llm.check_causes([_cause(restated, ids=ids)], report, "c")
+    assert any("instead of naming a business hypothesis" in i for i in issues), issues
+
+
+def test_restated_cause_feedback_suggests_a_hypothesis_from_the_linked_finding(report):
+    [issue] = [i for i in llm.check_causes(
+        [_cause("The return rate increase may be contributing to lower revenue.", ids=["I1"])], report, "c")
+        if "business hypothesis" in i]
+    assert 'e.g. "Product quality or defect issues may be contributing"' in issue
+    [issue] = [i for i in llm.check_causes(
+        [_cause("The profit decline may be contributing.", evidence="Profit fell 29.9%.", ids=["I2"])],
+        report, "c") if "business hypothesis" in i]
+    assert 'e.g. "Pricing or discount changes may be contributing"' in issue
+
+
+@pytest.mark.parametrize("hypothesis,ids", [
+    ("Product quality or defect issues may be contributing to the decline in revenue and units.", ["I1"]),
+    ("Fulfillment or delivery problems may be contributing to the higher return rate.", ["I1"]),
+    ("Pricing or discount changes may be contributing to the profit decline.", ["I2"]),
+    ("Weaker demand or stronger competition may be contributing to the revenue decline.", ["I3", "I5"]),
+])
+def test_business_hypothesis_with_linked_evidence_is_accepted(report, hypothesis, ids):
+    by_id = {i["id"]: i for i in report["key_insights"]}
+    cause = _cause(hypothesis, evidence=by_id[ids[0]]["summary"], ids=ids)
+    assert llm.check_causes([cause], report, "c") == []
+
+
+def test_retry_is_sent_restated_cause_feedback_then_fallback_keeps_hypotheses(report, monkeypatch):
+    bad = _mutated(reasoning__0__possible_explanations=[
+        _cause("South / Laptop Pro return rate increase may be contributing to the decline.")])
+    fake = FakeOllama(bad, bad)
+    monkeypatch.setattr(llm, "call_ollama", fake)
+    result = llm.explain_decision_report(report)
+    assert "Product quality or defect issues may be contributing" in fake.calls[1]["messages"][-1]["content"]
+    assert result["metadata"]["source"] == "fallback"
+    for c in [c for r in result["reasoning"] for c in r["possible_explanations"]]:
+        assert llm.BUSINESS_HYPOTHESIS.search(c["cause"]) and c["linked_insight_ids"]
+
+
+def test_prompt_requires_causes_to_name_a_business_hypothesis():
+    for prompt in (llm.SYSTEM_PROMPT, llm.QA_SYSTEM_PROMPT):
+        assert "NAME A BUSINESS HYPOTHESIS" in prompt
+        assert "a measured change is evidence, not a cause" in prompt
+
+
+def test_required_coverage_follows_the_recommendation_rule(report):
+    """decline_with_rising_returns is driven by the return-rate rise AND the decline."""
+    required = llm.required_cause_coverage(report)
+    by_id = {i["id"]: i for i in report["key_insights"]}
+    kinds = [{by_id[i]["type"] for i in r["insight_ids"]} for r in required]
+    assert {"return_rate_increase"} in kinds
+    assert any(k & llm.DECLINE_TYPES for k in kinds)
+    returns = next(r for r in required if r["insight_ids"] == ["I1"])
+    assert returns["suggested_hypotheses"] == ["Product quality or defect issues",
+                                              "Fulfillment or delivery problems"]
+    assert llm.build_llm_context(report)["causes_to_cover"] == required
+
+
+def test_explanation_missing_the_returns_hypothesis_is_rejected(report, monkeypatch):
+    """Valid causes that skip the return-rate finding behind the recommendation are not enough."""
+    by_id = {i["id"]: i for i in report["key_insights"]}
+    only_pricing = _mutated(reasoning__0__possible_explanations=[
+        _cause("Pricing or discount changes may be contributing to the decline in revenue.",
+               evidence=by_id["I3"]["summary"], ids=["I3", "I4"])])
+    issues = llm.validate_explanation(only_pricing, report)
+    assert any("No possible cause is linked to I1" in i and "Product quality or defect issues" in i
+               for i in issues)
+    fake = FakeOllama(only_pricing, only_pricing)
+    monkeypatch.setattr(llm, "call_ollama", fake)
+    result = llm.explain_decision_report(report)
+    assert "No possible cause is linked to I1" in fake.calls[1]["messages"][-1]["content"]
+    assert result["metadata"]["source"] == "fallback"
+
+
+def test_explanation_with_quality_hypothesis_on_returns_evidence_passes(report):
+    by_id = {i["id"]: i for i in report["key_insights"]}
+    covered = _mutated(reasoning__0__possible_explanations=[
+        _cause("Product quality or defect issues may be contributing to the decline in revenue and units.",
+               evidence="South / Laptop Pro return rate rose from 4.7% to 8.5% (+3.8 pp).", ids=["I1"]),
+        _cause("Weaker demand or stronger competition may be contributing to the revenue decline.",
+               evidence=by_id["I3"]["summary"], ids=["I3", "I5"]),
+    ])
+    assert llm.validate_explanation(covered, report) == []
+
+
+def test_fallback_always_covers_the_required_findings(report):
+    fallback = llm.fallback_explanation(report)
+    causes = [c for r in fallback["reasoning"] for c in r["possible_explanations"]]
+    assert llm.coverage_issues(causes, report) == []
+    assert "causes_to_cover" in llm.SYSTEM_PROMPT

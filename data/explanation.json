@@ -1,14 +1,15 @@
 {
-  "summary": "South / Laptop Pro segment has experienced a decline in revenue, profit, and units, with a significant increase in return rates.",
+  "summary": "From 2025 H1 to 2025 H2, total revenue changed +3.3% ($47.80M to $49.38M) and profit changed +3.6%. 7 issues detected (5 high, 1 medium, 1 low severity). Most severe: South / Laptop Pro return rate rose from 4.7% (2025 H1) to 8.5% (2025 H2), +3.8 pp (+80.5% relative, z = 4.8). Top recommendation: Investigate product quality, fulfillment, or customer experience for South / Laptop Pro before increasing inventory or marketing spend.",
   "key_findings": [
     {
-      "statement": "South / Laptop Pro revenue fell 25.2%, from $3.19M (2025 H1) to $2.39M (2025 H2).",
+      "statement": "South / Laptop Pro return rate rose from 4.7% (2025 H1) to 8.5% (2025 H2), +3.8 pp (+80.5% relative, z = 4.8).",
       "insight_ids": [
-        "I3"
+        "I1"
       ],
       "evidence_ids": [
-        "E7",
-        "E5"
+        "E1",
+        "E2",
+        "E3"
       ]
     },
     {
@@ -23,6 +24,28 @@
       ]
     },
     {
+      "statement": "South / Laptop Pro revenue fell 25.2%, from $3.19M (2025 H1) to $2.39M (2025 H2).",
+      "insight_ids": [
+        "I3"
+      ],
+      "evidence_ids": [
+        "E7",
+        "E5"
+      ]
+    },
+    {
+      "statement": "South / Laptop Pro revenue changed -25.2% ($3.19M to $2.39M), while Laptop Pro in other regions changed +4.6% (gap -29.8 pp) and other products in South changed +3.1% (gap -28.3 pp).",
+      "insight_ids": [
+        "I4"
+      ],
+      "evidence_ids": [
+        "E7",
+        "E8",
+        "E9",
+        "E5"
+      ]
+    },
+    {
       "statement": "South / Laptop Pro units fell 23.5%, from 2,217 (2025 H1) to 1,696 (2025 H2).",
       "insight_ids": [
         "I5"
@@ -33,55 +56,72 @@
       ]
     },
     {
-      "statement": "South / Laptop Pro return rate rose from 4.7% (2025 H1) to 8.5% (2025 H2), +3.8 pp (+80.5% relative, z = 4.8).",
+      "statement": "South revenue changed -4.8% ($11.44M to $10.89M), while all other regions changed +5.8% (gap -10.7 pp). Largest negative contributor: South / Laptop Pro (-$805.7K, against a net change of -$551.3K for South).",
       "insight_ids": [
-        "I1"
+        "I6"
       ],
       "evidence_ids": [
-        "E1",
-        "E2",
-        "E3"
+        "E11",
+        "E12",
+        "E13",
+        "E14"
+      ]
+    },
+    {
+      "statement": "Laptop Pro revenue changed -2.5% ($13.40M to $13.05M), while all other products changed +5.6% (gap -8.1 pp). Largest negative contributor: South / Laptop Pro (-$805.7K, against a net change of -$340.3K for Laptop Pro).",
+      "insight_ids": [
+        "I7"
+      ],
+      "evidence_ids": [
+        "E15",
+        "E16",
+        "E17",
+        "E18"
       ]
     }
   ],
   "reasoning": [
     {
       "observed_facts": [
-        "South / Laptop Pro revenue fell 25.2% (2025 H1 to 2025 H2)",
-        "South / Laptop Pro profit fell 29.9% (2025 H1 to 2025 H2)",
-        "South / Laptop Pro units fell 23.5% (2025 H1 to 2025 H2)",
-        "South / Laptop Pro return rate rose from 4.7% to 8.5% (2025 H1 to 2025 H2)"
+        "South / Laptop Pro revenue changed -25.2% ($3.19M to $2.39M), while Laptop Pro in other regions changed +4.6% (gap -29.8 pp) and other products in South changed +3.1% (gap -28.3 pp).",
+        "South / Laptop Pro return rate rose from 4.7% (2025 H1) to 8.5% (2025 H2), +3.8 pp (+80.5% relative, z = 4.8).",
+        "South / Laptop Pro profit fell 29.9%, from $859.8K (2025 H1) to $603.0K (2025 H2).",
+        "Profit margin fell from 26.9% to 25.3% (-1.7 pp).",
+        "This explains a wider finding: South revenue changed -4.8% ($11.44M to $10.89M), while all other regions changed +5.8% (gap -10.7 pp). Largest negative contributor: South / Laptop Pro (-$805.7K, against a net change of -$551.3K for South).",
+        "This explains a wider finding: Laptop Pro revenue changed -2.5% ($13.40M to $13.05M), while all other products changed +5.6% (gap -8.1 pp). Largest negative contributor: South / Laptop Pro (-$805.7K, against a net change of -$340.3K for Laptop Pro)."
       ],
       "possible_explanations": [
         {
-          "cause": "may be product quality issues contributing to the decline in units and revenue",
-          "evidence": "South / Laptop Pro return rate rose from 4.7% to 8.5% (+3.8 pp), indicating potential quality issues",
+          "cause": "A product quality or defect issue may be affecting this segment.",
+          "evidence": "South / Laptop Pro return rate rose from 4.7% (2025 H1) to 8.5% (2025 H2), +3.8 pp (+80.5% relative, z = 4.8).",
           "linked_insight_ids": [
             "I1"
           ]
         },
         {
-          "cause": "may be pricing issues contributing to the decline in profit and revenue",
-          "evidence": "South / Laptop Pro profit fell 29.9%, from $859.8K (2025 H1) to $603.0K (2025 H2), and revenue fell 25.2% (from $3.19M to $2.39M)",
+          "cause": "Fulfillment or delivery problems could be causing both returns and lost sales.",
+          "evidence": "South / Laptop Pro return rate rose from 4.7% (2025 H1) to 8.5% (2025 H2), +3.8 pp (+80.5% relative, z = 4.8).",
           "linked_insight_ids": [
-            "I2",
-            "I3"
+            "I1"
+          ]
+        },
+        {
+          "cause": "Demand, pricing, or competition changes could be reducing sales.",
+          "evidence": "South / Laptop Pro revenue fell 25.2%, from $3.19M (2025 H1) to $2.39M (2025 H2).",
+          "linked_insight_ids": [
+            "I3",
+            "I4"
+          ]
+        },
+        {
+          "cause": "Deeper discounting may have been used to support sales volume.",
+          "evidence": "South / Laptop Pro profit fell 29.9%, from $859.8K (2025 H1) to $603.0K (2025 H2).",
+          "linked_insight_ids": [
+            "I2"
           ]
         }
       ],
       "needs_further_investigation": true,
-      "insight_ids": [
-        "I1",
-        "I2",
-        "I3"
-      ]
-    }
-  ],
-  "recommendations": [
-    {
-      "action": "Investigate product quality, fulfillment, or customer experience for South / Laptop Pro before increasing inventory or marketing spend.",
-      "rationale": "Based on the evidence, product quality issues may be contributing to the decline in units and revenue.",
-      "recommendation_id": "R1",
       "insight_ids": [
         "I1",
         "I2",
@@ -90,105 +130,32 @@
         "I5",
         "I6",
         "I7"
+      ],
+      "note": "The data shows these changes happening together; it does not establish their cause. Further investigation is needed to confirm any explanation."
+    }
+  ],
+  "recommendations": [
+    {
+      "action": "Investigate product quality, fulfillment, or customer experience for South / Laptop Pro before increasing inventory or marketing spend.",
+      "rationale": "South / Laptop Pro return rate rose from 4.7% (2025 H1) to 8.5% (2025 H2), +3.8 pp (+80.5% relative, z = 4.8). South / Laptop Pro revenue fell 25.2%, from $3.19M (2025 H1) to $2.39M (2025 H2). South / Laptop Pro revenue changed -25.2% ($3.19M to $2.39M), while Laptop Pro in other regions changed +4.6% (gap -29.8 pp) and other products in South changed +3.1% (gap -28.3 pp). South / Laptop Pro units fell 23.5%, from 2,217 (2025 H1) to 1,696 (2025 H2).",
+      "recommendation_id": "R1",
+      "insight_ids": [
+        "I1",
+        "I3",
+        "I4",
+        "I5"
+      ]
+    },
+    {
+      "action": "Review discount depth and pricing for South / Laptop Pro; margin is shrinking on top of the volume loss.",
+      "rationale": "South / Laptop Pro profit fell 29.9%, from $859.8K (2025 H1) to $603.0K (2025 H2). Profit margin fell from 26.9% to 25.3% (-1.7 pp).",
+      "recommendation_id": "R1",
+      "insight_ids": [
+        "I2"
       ]
     }
   ],
   "evidence_references": [
-    {
-      "id": "E7",
-      "description": "South / Laptop Pro revenue",
-      "metric": "revenue",
-      "filters": {
-        "region": [
-          "South"
-        ],
-        "product": [
-          "Laptop Pro"
-        ]
-      },
-      "period_previous": "2025 H1",
-      "period_current": "2025 H2",
-      "previous_value": 3190759.2,
-      "current_value": 2385034.75,
-      "change": -805724.45,
-      "change_percent": -25.25
-    },
-    {
-      "id": "E5",
-      "description": "South / Laptop Pro return rate",
-      "metric": "return_rate",
-      "filters": {
-        "region": [
-          "South"
-        ],
-        "product": [
-          "Laptop Pro"
-        ]
-      },
-      "period_previous": "2025 H1",
-      "period_current": "2025 H2",
-      "previous_value": 0.047361,
-      "current_value": 0.085495,
-      "change": 0.038134,
-      "change_percent": 80.52
-    },
-    {
-      "id": "E4",
-      "description": "South / Laptop Pro profit",
-      "metric": "profit",
-      "filters": {
-        "region": [
-          "South"
-        ],
-        "product": [
-          "Laptop Pro"
-        ]
-      },
-      "period_previous": "2025 H1",
-      "period_current": "2025 H2",
-      "previous_value": 859774.1,
-      "current_value": 602979.06,
-      "change": -256795.04,
-      "change_percent": -29.87
-    },
-    {
-      "id": "E6",
-      "description": "South / Laptop Pro profit margin",
-      "metric": "profit_margin",
-      "filters": {
-        "region": [
-          "South"
-        ],
-        "product": [
-          "Laptop Pro"
-        ]
-      },
-      "period_previous": "2025 H1",
-      "period_current": "2025 H2",
-      "previous_value": 0.269458,
-      "current_value": 0.252818,
-      "change": -0.01664,
-      "change_percent": -6.18
-    },
-    {
-      "id": "E10",
-      "description": "South / Laptop Pro units",
-      "metric": "units",
-      "filters": {
-        "region": [
-          "South"
-        ],
-        "product": [
-          "Laptop Pro"
-        ]
-      },
-      "period_previous": "2025 H1",
-      "period_current": "2025 H2",
-      "previous_value": 2217,
-      "current_value": 1696,
-      "change": -521,
-      "change_percent": -23.5
-    },
     {
       "id": "E1",
       "description": "South / Laptop Pro return rate",
@@ -252,6 +219,82 @@
       "change_percent": -1.75
     },
     {
+      "id": "E4",
+      "description": "South / Laptop Pro profit",
+      "metric": "profit",
+      "filters": {
+        "region": [
+          "South"
+        ],
+        "product": [
+          "Laptop Pro"
+        ]
+      },
+      "period_previous": "2025 H1",
+      "period_current": "2025 H2",
+      "previous_value": 859774.1,
+      "current_value": 602979.06,
+      "change": -256795.04,
+      "change_percent": -29.87
+    },
+    {
+      "id": "E5",
+      "description": "South / Laptop Pro return rate",
+      "metric": "return_rate",
+      "filters": {
+        "region": [
+          "South"
+        ],
+        "product": [
+          "Laptop Pro"
+        ]
+      },
+      "period_previous": "2025 H1",
+      "period_current": "2025 H2",
+      "previous_value": 0.047361,
+      "current_value": 0.085495,
+      "change": 0.038134,
+      "change_percent": 80.52
+    },
+    {
+      "id": "E6",
+      "description": "South / Laptop Pro profit margin",
+      "metric": "profit_margin",
+      "filters": {
+        "region": [
+          "South"
+        ],
+        "product": [
+          "Laptop Pro"
+        ]
+      },
+      "period_previous": "2025 H1",
+      "period_current": "2025 H2",
+      "previous_value": 0.269458,
+      "current_value": 0.252818,
+      "change": -0.01664,
+      "change_percent": -6.18
+    },
+    {
+      "id": "E7",
+      "description": "South / Laptop Pro revenue",
+      "metric": "revenue",
+      "filters": {
+        "region": [
+          "South"
+        ],
+        "product": [
+          "Laptop Pro"
+        ]
+      },
+      "period_previous": "2025 H1",
+      "period_current": "2025 H2",
+      "previous_value": 3190759.2,
+      "current_value": 2385034.75,
+      "change": -805724.45,
+      "change_percent": -25.25
+    },
+    {
       "id": "E8",
       "description": "Laptop Pro in other regions revenue",
       "metric": "revenue",
@@ -293,6 +336,25 @@
       "current_value": 8508322.35,
       "change": 254395.89,
       "change_percent": 3.08
+    },
+    {
+      "id": "E10",
+      "description": "South / Laptop Pro units",
+      "metric": "units",
+      "filters": {
+        "region": [
+          "South"
+        ],
+        "product": [
+          "Laptop Pro"
+        ]
+      },
+      "period_previous": "2025 H1",
+      "period_current": "2025 H2",
+      "previous_value": 2217,
+      "current_value": 1696,
+      "change": -521,
+      "change_percent": -23.5
     },
     {
       "id": "E11",
@@ -435,9 +497,11 @@
     }
   ],
   "metadata": {
-    "source": "llm",
+    "source": "fallback",
     "model": "llama3.2:3b",
-    "fallback_reason": null,
-    "validation_issues": []
+    "fallback_reason": "LLM response failed validation.",
+    "validation_issues": [
+      "No possible cause is linked to I3, I4, I5, which drove the recommendation. Add one, e.g. \"Pricing or discount changes may be contributing\" or \"Weaker demand or stronger competition may be contributing\", with that finding as evidence."
+    ]
   }
 }

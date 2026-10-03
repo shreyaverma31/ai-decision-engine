@@ -103,10 +103,17 @@ def test_exactly_three_possible_causes_each_linked_to_a_signal(noisy):
         "Demand, pricing, or competition changes",
     ]
     m = noisy[2]["problem"]["metrics"]
-    assert [c["metric"] for c in causes] == ["return_rate", "return_rate", "units"]
+    assert [c["metric"] for c in causes] == ["return_rate", "return_rate", "revenue"]
     assert causes[0]["signal"].startswith(
         f"Return rate {m['return_rate']['previous'] * 100:.1f}% → {m['return_rate']['current'] * 100:.1f}%")
-    assert causes[2]["signal"].startswith("Units ")
+    assert causes[2]["signal"].startswith("Revenue ")
+    for c in causes:
+        assert c["statement"] == f"{c['cause']} may be contributing. This requires investigation."
+    rr = m["return_rate"]
+    assert causes[0]["evidence_text"] == (
+        f"Return rate increased from {rr['previous'] * 100:.1f}% to {rr['current'] * 100:.1f}%.")
+    assert causes[2]["evidence_text"].startswith(
+        f"Revenue declined by {abs(m['revenue']['change_percent']):.1f}% (")
 
 
 def test_cause_is_dropped_when_its_signal_did_not_move():
@@ -115,7 +122,7 @@ def test_cause_is_dropped_when_its_signal_did_not_move():
     flat = {"change": 0.0, "previous": 0.05, "current": 0.05, "change_percent": 0.0}
     down = {"change": -10, "previous": 100, "current": 90, "change_percent": -10.0}
     causes = linked_possible_causes("decline_with_rising_returns",
-                                    {"return_rate": flat, "units": down})
+                                    {"return_rate": flat, "revenue": down})
     assert [c["cause"] for c in causes] == ["Demand, pricing, or competition changes"]
 
 
@@ -265,3 +272,51 @@ def test_fallback_answer_leads_with_the_asked_metric_for_the_named_segment(noisy
     first = by_id[answer["insight_ids"][0]]
     assert first["metric"] == first_metric
     assert first["dimension_value"] == "South / Laptop Pro"
+
+
+
+def test_significance_checks_use_the_engine_thresholds(noisy):
+    from engine import Thresholds
+
+    t = Thresholds()
+    checks = {c["metric"]: c for c in noisy[2]["problem"]["significance"]}
+    assert set(checks) == {"revenue", "profit", "units", "return_rate"}
+    m = noisy[2]["problem"]["metrics"]
+    for metric in ("revenue", "profit", "units"):
+        assert checks[metric]["significant"] is (m[metric]["change_percent"] <= -t.decline_pct)
+        assert f"{t.decline_pct:.0f}%" in checks[metric]["criterion"]
+    rr = checks["return_rate"]
+    assert rr["significant"] and "z = " in rr["value"] and f"z ≥ {t.min_z_score:g}" in rr["criterion"]
+
+
+def test_significance_marks_small_changes_as_not_significant():
+    from engine import Thresholds
+    from story import significance_checks
+
+    small = {"change_percent": -2.0}
+    rr = {"change_percent": 5.0, "change": 0.001, "z_score": 0.4}
+    checks = significance_checks({"revenue": small, "profit": small, "units": small, "return_rate": rr},
+                                 [], "S / P", Thresholds())
+    assert not any(c["significant"] for c in checks)
+
+
+def test_supporting_findings_list_the_engine_insights(noisy):
+    p = noisy[2]["problem"]
+    focused = noisy[2]["focused_report"]
+    assert [f["id"] for f in p["findings"]] == [i["id"] for i in focused["key_insights"]]
+    evidence_ids = {e["id"] for e in focused["evidence"]}
+    for f in p["findings"]:
+        assert f["evidence_ids"] and set(f["evidence_ids"]) <= evidence_ids
+        assert f["label"] and f["severity"] in {"high", "medium", "low"}
+
+
+def test_action_explains_its_rule(noisy):
+    action = noisy[2]["problem"]["action"]
+    assert noisy[2]["problem"]["rule"] == "decline_with_rising_returns"
+    assert action["rule_description"].startswith("Sales fell significantly while the return rate rose")
+
+
+def test_cause_statements_never_claim_causation(noisy):
+    for c in noisy[2]["problem"]["possible_causes"]:
+        assert "may be contributing" in c["statement"]
+        assert not llm.states_cause(c["statement"])

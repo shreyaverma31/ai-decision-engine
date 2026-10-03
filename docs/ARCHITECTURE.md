@@ -58,7 +58,7 @@ Every explanation and every answer to a question is rejected if:
 
 On failure the model gets one retry, with the list of problems fed back. If that fails too, or Ollama is down, a deterministic explanation built from the same evidence is shown. The UI always says which one the user is seeing.
 
-## Testing (pytest, 222 tests, no Ollama required)
+## Testing (pytest, 248 tests, no Ollama required)
 
 - **KPIs and validation:** the KPI maths and the data validation rules.
 - **Planted problem:** the synthetic dataset has a known problem, and the tests check it is detected, with no false positives in a healthy control dataset.
