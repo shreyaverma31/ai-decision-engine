@@ -322,3 +322,33 @@ def test_traceability_evidence_ids_are_sorted():
     for ids in table["Evidence"]:
         parts = ids.split(", ")
         assert parts == sorted(parts, key=lambda x: (x[0], int(x[1:])))
+
+
+# --- Cache invalidation across deploys ----------------------------------------
+
+def test_code_version_follows_source_contents(tmp_path):
+    a, b = tmp_path / "a.py", tmp_path / "b.py"
+    a.write_text("x = 1")
+    b.write_text("y = 2")
+    before = app._hash_sources([a, b])
+    assert before == app._hash_sources([a, b]) and len(before) == 12
+    b.write_text("y = 3")
+    assert app._hash_sources([a, b]) != before
+    assert len(app.CODE_VERSION) == 12
+
+
+def test_new_code_version_recomputes_instead_of_serving_stale_cache(monkeypatch):
+    """A deploy that changes story/engine/... must not reuse results cached by the old code."""
+    calls = []
+    real = app.generate_decision_report
+
+    def counting(df):
+        calls.append(1)
+        return real(df)
+
+    monkeypatch.setattr(app, "generate_decision_report", counting)
+    app.analyze(DEMO_BYTES, "old-version")
+    app.analyze(DEMO_BYTES, "old-version")
+    assert len(calls) == 1          # same code version: cached
+    app.analyze(DEMO_BYTES, "new-version")
+    assert len(calls) == 2          # new code version: recomputed

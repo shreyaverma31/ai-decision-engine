@@ -13,6 +13,7 @@ The LLM (llm.py) only sees the structured report, never the CSV.
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import logging
@@ -32,6 +33,21 @@ DEMO_PATH = Path(__file__).parent / "data" / "sales.csv"
 FOOTER = ("All numerical insights are calculated from the uploaded business data. "
           "Possible causes are hypotheses and require investigation.")
 log = logging.getLogger("ai_decision_engine")
+
+
+def _hash_sources(paths) -> str:
+    """Short hash of the given source files' contents."""
+    digest = hashlib.sha256()
+    for path in paths:
+        digest.update(Path(path).read_bytes())
+    return digest.hexdigest()[:12]
+
+
+# Passed to every cached function below. st.cache_data keys on a function's own source and its
+# arguments, not on the code it calls, so without this a running server could keep serving
+# results built by an older story.py/engine.py/... after a deploy.
+CODE_VERSION = _hash_sources(Path(__file__).parent / name
+                             for name in ("story.py", "engine.py", "analyzer.py", "llm.py"))
 
 
 class DataError(Exception):
@@ -59,7 +75,7 @@ def load_csv(data: bytes) -> pd.DataFrame:
 
 
 @st.cache_data(show_spinner=False)
-def analyze(data: bytes) -> tuple[pd.DataFrame, dict, dict]:
+def analyze(data: bytes, code_version: str = CODE_VERSION) -> tuple[pd.DataFrame, dict, dict]:
     df = load_csv(data)
     try:
         report = generate_decision_report(df)
@@ -69,12 +85,12 @@ def analyze(data: bytes) -> tuple[pd.DataFrame, dict, dict]:
 
 
 @st.cache_data(show_spinner=False)
-def explain(report_json: str, use_llm: bool) -> dict:
+def explain(report_json: str, use_llm: bool, code_version: str = CODE_VERSION) -> dict:
     return explain_decision_report(json.loads(report_json), use_llm=use_llm)
 
 
 @st.cache_data(show_spinner=False)
-def ask(report_json: str, question: str, use_llm: bool) -> dict:
+def ask(report_json: str, question: str, use_llm: bool, code_version: str = CODE_VERSION) -> dict:
     return answer_question(json.loads(report_json), question, use_llm=use_llm)
 
 
@@ -352,7 +368,7 @@ def section_explanation(story: dict, use_llm: bool) -> None:
     spinner = ("Generating the AI explanation with the local model (this can take a minute)…"
                if use_llm else "Preparing the explanation…")
     with st.spinner(spinner):
-        result = explain(json.dumps(story["focused_report"]), use_llm)
+        result = explain(json.dumps(story["focused_report"]), use_llm, CODE_VERSION)
     status_message(result)
     st.caption("The AI only explains the evidence above. It was not asked to find the cause itself, and its "
                "output is checked against the evidence before it is shown.")
@@ -398,7 +414,7 @@ def section_question(report: dict, placeholder: str, use_llm: bool) -> None:
         st.warning("Please type a question first.")
         return
     with st.spinner("Answering from the verified evidence…"):
-        result = ask(json.dumps(report), question.strip(), use_llm)
+        result = ask(json.dumps(report), question.strip(), use_llm, CODE_VERSION)
     status_message(result)
     st.markdown(md(result["answer"]))
     if result["possible_explanations"]:
@@ -454,7 +470,7 @@ def main() -> None:
         return
 
     try:
-        df, report, story = analyze(data)
+        df, report, story = analyze(data, CODE_VERSION)
     except DataError as exc:
         st.error(md(str(exc)), icon="🚫")
         st.caption("Expected columns: " + ", ".join(REQUIRED_COLUMNS))
